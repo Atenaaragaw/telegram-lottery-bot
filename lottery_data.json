@@ -1,9 +1,0 @@
-{
-    "game_active": true,
-    "ticket_price": 100,
-    "prize": "5,000 ETB",
-    "tickets": {},
-    "announcement_message_ids": {
-        "-1004347063089": 231
-    }
-}
