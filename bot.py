@@ -84,6 +84,8 @@ def generate_ticket_keyboard(tickets, bot_username=""):
     row = []
     status_emojis = {"open": "🟢", "pending": "🟡", "sold": "🔴"}
 
+    actual_username = "AddisHub_Bot"
+
     for i in range(1, 51):
         t_num = str(i)
         info = tickets.get(t_num, {"status": "open"})
@@ -92,9 +94,8 @@ def generate_ticket_keyboard(tickets, bot_username=""):
 
         label = f"{t_num} {emoji}"
         
-        # open የሆኑ ቲኬቶች ሲጫኑ በቀጥታ ወደ ቦቱ ፕራይቬት ቻት በ Deep-Link (/start tkt_X) እንዲሄዱ ይደረጋል
-        if status == "open" and bot_username:
-            url = f"https://t.me/{bot_username}?start=tkt_{t_num}"
+        if status == "open":
+            url = f"https://t.me/{actual_username}?start=tkt_{t_num}"
             row.append(InlineKeyboardButton(label, url=url))
         else:
             row.append(InlineKeyboardButton(label, callback_data=f"tkt_info_{t_num}"))
@@ -161,7 +162,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     data = load_data()
 
-    # ተጠቃሚው ዲፕ-ሊንክ (Deep-link) ተጠቅሞ ሲገባ (ለምሳሌ /start tkt_5)
     if args and args[0].startswith("tkt_"):
         t_num = args[0].split("_")[1]
         ticket = data["tickets"].get(t_num)
@@ -196,13 +196,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.error(f"Error updating live boards: {e}")
 
             instructions = (
-                f"🎟 የመረጡት ቲኬት ቁጥር: {t_num}\n\n"
+                f"🎟 መረጡት ቲኬት ቁጥር: {t_num}\n\n"
                 f"⚠️ ማሳሰቢያ: ይህ ቲኬት ለሚቀጥሉት 30 ደቂቃዎች ብቻ ለእርስዎ ተይዟል!\n\n"
                 f"ትኬቱን ለመግዛት ከታች ያሉትን የቴሌብር መመሪያዎች ይከተሉ:\n\n"
                 f"1️⃣ በ TeleBirr ገንዘብ ያስተላልፉ:\n"
                 f"   📱 አካውንት ቁጥር: {TELE_BIRR_NUMBER}\n"
                 f"   💵 መጠን: {data['ticket_price']} ብር\n\n"
-                f"2️⃣ ገንዘቡን ከላኩ በኋላ የግብይቱን ማረጋገጫ በዚህ ፕራይቬት ቻት ፎቶ ወይም ጽሑፍ በመላክ(messageውን reply በማድረግ) ያረጋግጡ።"
+                f"2️⃣ ገንዘቡን ከላኩ በኋላ የግብይቱን ማረጋገጫ በዚህ ፕራይቬት ቻት ፎቶ ወይም ጽሑፍ በመላክ ያረጋግጡ።"
             )
             await update.message.reply_text(instructions)
             return
@@ -210,7 +210,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bot_info = await context.bot.get_me()
     keyboard = generate_ticket_keyboard(data["tickets"], bot_info.username)
     welcome_text = (
-        f"🇪🇹 እንኳን ደህና መጡ ወደ አዲስ ሎተሪ ቦት!\n\n"
+        f"🇪🇹 እንኳን ደህና መጡ ወደ ሎተሪ ቦት!\n\n"
         f"💰 የቲኬት ዋጋ፡ {data['ticket_price']} ብር\n"
         f"🎁 ሽልማት: {data['prize']}\n\n"
         f"ከታች የሚፈልጉትን ቲኬት በመምረጥ መግዛት ይችላሉ:"
@@ -427,7 +427,7 @@ async def cmd_open(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(channel_keyboard),
         )
 
-        await update.message.reply_text("✅ ሎተሪው ተከፍቷል እና ሰንጠረዡ በዲፕ-ሊንክ ተዘጋጅቷል!")
+        await update.message.reply_text("✅ ሎተሪው ተከፍቷል እና ሰንጠረዡ ተዘጋጅቷል!")
     except Exception as e:
         await update.message.reply_text(f"⚠️ መለጠፍ አልተቻለም: {e}")
 
@@ -477,7 +477,7 @@ def main():
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.PHOTO | filters.TEXT & ~filters.COMMAND, handle_payment_proof))
 
-    print("Bot is running with correct Deep-Link start routing...")
+    print("Bot is running with AddisHub_Bot deep links...")
     app.run_polling()
 
 
