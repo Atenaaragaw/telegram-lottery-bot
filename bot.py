@@ -178,15 +178,34 @@ async def admin_decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ... (ሌሎች Functions እንደ winner ቀደም ሲል ከነበረው ጋር ተመሳሳይ ናቸው) ...
 
 def main():
-    init_db() # ዳታቤዝ ማስጀመር
-    keep_alive()
-    app_bot = Application.builder().token(BOT_TOKEN).build()
-    app_bot.add_handler(CommandHandler("start", start))
-    app_bot.add_handler(MessageHandler(filters.REPLY & filters.User(ADMIN_CHAT_ID), admin_decision))
-    app_bot.add_handler(MessageHandler(filters.ChatType.PRIVATE & (filters.PHOTO | filters.TEXT), handle_proof))
-    app_bot.add_handler(CallbackQueryHandler(lambda u, c: u.callback_query.answer(url=f"https://t.me/YOUR_BOT_USERNAME?start={u.callback_query.data}")))
+    # ዳታቤዝ ማስጀመር
+    init_db()
     
-    app_bot.run_polling()
+    # ሰርቨሩን በባክግራውንድ ማስጀመር
+    keep_alive()
+
+    application = Application.builder().token(BOT_TOKEN).build()
+
+    # 1. ትዕዛዞች (Commands)
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("open", open_lottery))
+    application.add_handler(CommandHandler("winner", pick_winner))
+
+    # 2. የአስተዳዳሪ ውሳኔ (Approve/Reject) - Reply ሲደረግ ብቻ
+    application.add_handler(MessageHandler(filters.REPLY & filters.User(ADMIN_CHAT_ID), admin_decision))
+
+    # 3. ቁጥር መምረጫ (Callback Query)
+    application.add_handler(CallbackQueryHandler(handle_callback))
+
+    # 4. የክፍያ ማረጋገጫ መቀበያ (ፎቶ ወይም ጽሑፍ ሲላክ)
+    # ማሳሰቢያ፡ ትዕዛዞችን (~filters.COMMAND) ወደ እዚህ እንዳይመጡ ይከለክላል
+    application.add_handler(MessageHandler(
+        filters.ChatType.PRIVATE & (filters.PHOTO | filters.TEXT) & ~filters.COMMAND, 
+        handle_proof
+    ))
+
+    print("Bot is running perfectly...")
+    application.run_polling()
 
 if __name__ == '__main__':
     main()
