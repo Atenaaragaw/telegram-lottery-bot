@@ -120,12 +120,23 @@ def get_setting(key):
 # --- 4. ቦት ተግባራት ---
 
 def mask_phone(phone):
-    """ስልክ ቁጥር ለመደበቅ (ለምሳሌ፡ 0912****44)"""
-    if not phone: return "ያልታወቀ"
+    """ስልክ ቁጥር ለመደበቅ (ለምሳሌ፡ 0915289523 -> 0915****23)"""
+    if not phone: 
+        return "ያልታወቀ"
+    
     p = str(phone).strip()
-    if len(p) >= 9:
-        return p[:4] + "****" + p[-2:]
-    return "****"
+    
+    # ስልኩ 10 ወይም ከዚያ በላይ ቁጥር ካለው (ለምሳሌ 0915289523)
+    if len(p) >= 10:
+        # የመጀመሪያዎቹን 4 ቁጥሮች ይወስዳል + ኮከቦችን ይጨምራል + የመጨረሻዎቹን 2 ቁጥሮች ይጨምራል
+        return f"{p[:4]}****{p[-2:]}"
+    
+    # ስልኩ 9 ቁጥር ከሆነ (ለምሳሌ 915289523)
+    elif len(p) == 9:
+        return f"{p[:3]}****{p[-2:]}"
+    
+    else:
+        return "****"
 
 async def update_live_messages(context: ContextTypes.DEFAULT_TYPE):
     tickets_data = get_all_tickets()
