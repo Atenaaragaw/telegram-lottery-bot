@@ -91,7 +91,13 @@ def generate_ticket_keyboard(tickets, bot_username=""):
         emoji = status_emojis.get(status, "🟢")
 
         label = f"{t_num} {emoji}"
-        row.append(InlineKeyboardButton(label, callback_data=f"tkt_select_{t_num}"))
+        
+        # open የሆኑ ቲኬቶች ሲጫኑ በቀጥታ ወደ ቦቱ ፕራይቬት ቻት በ Deep-Link (/start tkt_X) እንዲሄዱ ይደረጋል
+        if status == "open" and bot_username:
+            url = f"https://t.me/{bot_username}?start=tkt_{t_num}"
+            row.append(InlineKeyboardButton(label, url=url))
+        else:
+            row.append(InlineKeyboardButton(label, callback_data=f"tkt_info_{t_num}"))
 
         if len(row) == 5:
             keyboard.append(row)
@@ -152,12 +158,59 @@ async def update_live_boards(context: ContextTypes.DEFAULT_TYPE):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    args = context.args
     data = load_data()
+
+    # ተጠቃሚው ዲፕ-ሊንክ (Deep-link) ተጠቅሞ ሲገባ (ለምሳሌ /start tkt_5)
+    if args and args[0].startswith("tkt_"):
+        t_num = args[0].split("_")[1]
+        ticket = data["tickets"].get(t_num)
+
+        if ticket:
+            if ticket["status"] == "sold":
+                await update.message.reply_text(
+                    f"❌ ይቅርታ! ቲኬት ቁጥር {t_num} ቀድሞውኑ ተሽጧል።"
+                )
+                return
+
+            if ticket["status"] == "pending":
+                if ticket["user_id"] == user.id:
+                    await update.message.reply_text(
+                        f"⚠️ ቲኬት ቁጥር {t_num} በእርስዎ ስም ክፍያ ማረጋገጫ በመጠበቅ ላይ ይገኛል።"
+                    )
+                else:
+                    await update.message.reply_text(
+                        f"⚠️ ይቅርታ! ቲኬት ቁጥር {t_num} በአሁኑ ሰዓት በሌላ ተጠቃሚ ክፍያ ሂደት ላይ ነው።"
+                    )
+                return
+
+            data["tickets"][t_num]["status"] = "pending"
+            data["tickets"][t_num]["user_id"] = user.id
+            data["tickets"][t_num]["username"] = user.username
+            data["tickets"][t_num]["pending_time"] = datetime.now().isoformat()
+            save_data(data)
+
+            try:
+                await update_live_boards(context)
+            except Exception as e:
+                logger.error(f"Error updating live boards: {e}")
+
+            instructions = (
+                f"🎟 የመረጡት ቲኬት ቁጥር: {t_num}\n\n"
+                f"⚠️ ማሳሰቢያ: ይህ ቲኬት ለሚቀጥሉት 30 ደቂቃዎች ብቻ ለእርስዎ ተይዟል!\n\n"
+                f"ትኬቱን ለመግዛት ከታች ያሉትን የቴሌብር መመሪያዎች ይከተሉ:\n\n"
+                f"1️⃣ በ TeleBirr ገንዘብ ያስተላልፉ:\n"
+                f"   📱 አካውንት ቁጥር: {TELE_BIRR_NUMBER}\n"
+                f"   💵 መጠን: {data['ticket_price']} ብር\n\n"
+                f"2️⃣ ገንዘቡን ከላኩ በኋላ የግብይቱን ማረጋገጫ በዚህ ፕራይቬት ቻት ፎቶ ወይም ጽሑፍ በመላክ(messageውን reply በማድረግ) ያረጋግጡ።"
+            )
+            await update.message.reply_text(instructions)
+            return
 
     bot_info = await context.bot.get_me()
     keyboard = generate_ticket_keyboard(data["tickets"], bot_info.username)
     welcome_text = (
-        f"🇪🇹 እንኳን ደህና መጡ ወደ ሎተሪ ቦት!\n\n"
+        f"🇪🇹 እንኳን ደህና መጡ ወደ አዲስ ሎተሪ ቦት!\n\n"
         f"💰 የቲኬት ዋጋ፡ {data['ticket_price']} ብር\n"
         f"🎁 ሽልማት: {data['prize']}\n\n"
         f"ከታች የሚፈልጉትን ቲኬት በመምረጥ መግዛት ይችላሉ:"
@@ -167,14 +220,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    
     try:
         await query.answer()
     except Exception:
         pass
 
     data = load_data()
-    user = query.from_user
 
     if query.data == "refresh_board":
         await update_live_boards(context)
@@ -182,51 +233,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("ሰንጠረዡ ታድሷል!", show_alert=False)
         except Exception:
             pass
-        return
-
-    if query.data.startswith("tkt_select_"):
-        t_num = query.data.split("_")[2]
-        ticket = data["tickets"].get(t_num)
-
-        if not ticket:
-            return
-
-        if ticket["status"] == "sold":
-            await query.answer(f"❌ ይቅርታ! ቲኬት ቁጥር {t_num} ቀድሞውኑ ተሽጧል።", show_alert=True)
-            return
-
-        if ticket["status"] == "pending":
-            if ticket["user_id"] == user.id:
-                await query.answer(f"⚠️ ቲኬት ቁጥር {t_num} በእርስዎ ስም ክፍያ በመጠበቅ ላይ ነው።", show_alert=True)
-            else:
-                await query.answer(f"⚠️ ይቅርታ! ይህ ቲኬት በሌላ ሰው የክፍያ ሂደት ላይ ነው።", show_alert=True)
-            return
-
-        data["tickets"][t_num]["status"] = "pending"
-        data["tickets"][t_num]["user_id"] = user.id
-        data["tickets"][t_num]["username"] = user.username
-        data["tickets"][t_num]["pending_time"] = datetime.now().isoformat()
-        save_data(data)
-
-        try:
-            await update_live_boards(context)
-        except Exception as e:
-            logger.error(f"Error updating live boards: {e}")
-
-        instructions = (
-            f"🎟 መረጡት ቲኬት ቁጥር: {t_num}\n\n"
-            f"⚠️ ማሳሰቢያ: ይህ ቲኬት ለሚቀጥሉት 30 ደቂቃዎች ብቻ ለእርስዎ ተይዟል!\n\n"
-            f"ትኬቱን ለመግዛት ከታች ያሉትን የቴሌብር መመሪያዎች ይከተሉ:\n\n"
-            f"1️⃣ በ TeleBirr ገንዘብ ያስተላልፉ:\n"
-            f"   📱 አካውንት ቁጥር: {TELE_BIRR_NUMBER}\n"
-            f"   💵 መጠን: {data['ticket_price']} ብር\n\n"
-            f"2️⃣ ገንዘቡን ከላኩ በኋላ የግብይቱን ማረጋገጫ በዚህ ፕራይቬት ቻት ፎቶ ወይም ጽሑፍ በመላክ ያረጋግጡ።"
-        )
-        
-        try:
-            await context.bot.send_message(chat_id=user.id, text=instructions)
-        except Exception as e:
-            logger.error(f"Could not send instructions to user {user.id}: {e}")
         return
 
     if query.data.startswith("tkt_info_"):
@@ -421,7 +427,7 @@ async def cmd_open(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(channel_keyboard),
         )
 
-        await update.message.reply_text("✅ ሎተሪው ተከፍቷል እና ሰንጠረዡ ተዘጋጅቷል!")
+        await update.message.reply_text("✅ ሎተሪው ተከፍቷል እና ሰንጠረዡ በዲፕ-ሊንክ ተዘጋጅቷል!")
     except Exception as e:
         await update.message.reply_text(f"⚠️ መለጠፍ አልተቻለም: {e}")
 
@@ -471,7 +477,7 @@ def main():
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.PHOTO | filters.TEXT & ~filters.COMMAND, handle_payment_proof))
 
-    print("Bot is running with fully responsive callback buttons...")
+    print("Bot is running with correct Deep-Link start routing...")
     app.run_polling()
 
 
