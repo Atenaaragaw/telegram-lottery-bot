@@ -63,7 +63,6 @@ def init_db():
         )
     ''')
     # ኮለም መኖሩን ቼክ ማድረግ (ካልነበረ ለመጨመር)
-    cur.execute("PRAGMA table_info(tickets)") # ይሄ ለ SQLite ነው፣ ለ Postgres ከሆነ:
     cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name='tickets' AND column_name='phone_number'")
     if not cur.fetchone():
         cur.execute("ALTER TABLE tickets ADD COLUMN phone_number TEXT")
