@@ -1,485 +1,277 @@
-from datetime import datetime, timedelta
-import json
-import logging
 import os
+import logging
+import asyncio
 import random
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import (
-    ApplicationBuilder,
-    CallbackQueryHandler,
-    CommandHandler,
-    ContextTypes,
-    MessageHandler,
-    filters,
-)
+from datetime import datetime, timedelta
+from threading import Thread
+from flask import Flask
 
-# --- CONFIGURATION ---
+# Telegram libraries
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
+
+# --- 1. ለ Render KEEP-ALIVE ሰርቨር (Flask) ---
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is running 24/7!"
+
+def run_flask():
+    # Render የሚሰጠውን PORT ይጠቀማል፣ ካልተገኘ 8080
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+    t = Thread(target=run_flask)
+    t.daemon = True
+    t.start()
+
+# --- 2. የቦቱ ማዋቀሪያ (CONFIG) ---
 BOT_TOKEN = "7805572091:AAGal4nWPVNsItMFa5WpN2KJUQpxYcgEbDs"
-ADMIN_CHAT_ID = int("5935470765")
-GROUP_CHAT_ID = int("-1004347063089")
-CHANNEL_CHAT_ID = int("-1003866567193")
+ADMIN_CHAT_ID = 5935470765
+GROUP_CHAT_ID = -1004347063089
+CHANNEL_CHAT_ID = -1003866567193
 TELE_BIRR_NUMBER = "0912801444"
+TICKET_PRICE = 100
+TOTAL_TICKETS = 50
 
-DATA_FILE = "lottery_data.json"
+# የቲኬቶች ዳታቤዝ (በሜሞሪ ላይ)
+# ማሳሰቢያ፡ ቦቱ Restart ሲያደርግ ይህ መረጃ ይጠፋል
+tickets = {i: {"status": "🟢", "user_id": None, "user_name": "", "expires_at": None} for i in range(1, TOTAL_TICKETS + 1)}
+message_trackers = {"group_msg_id": None, "channel_msg_id": None}
 
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
+# --- 3. ረዳት ተግባራት (HELPER FUNCTIONS) ---
 
-def load_data():
-    if not os.path.exists(DATA_FILE):
-        tickets = {}
-        for i in range(1, 51):
-            t_num = str(i)
-            tickets[t_num] = {
-                "status": "open",
-                "user_id": None,
-                "username": None,
-                "pending_time": None,
-            }
-
-        default_data = {
-            "game_active": False,
-            "ticket_price": 100,
-            "prize": "5,000 ETB",
-            "tickets": tickets,
-            "announcement_message_ids": {},
-        }
-        save_data(default_data)
-        return default_data
-
-    with open(DATA_FILE, "r") as f:
-        data = json.load(f)
-
-    updated = False
-    now = datetime.now()
-    for t_num, info in data.get("tickets", {}).items():
-        if info["status"] == "pending" and info.get("pending_time"):
-            try:
-                p_time = datetime.fromisoformat(info["pending_time"])
-                if now - p_time > timedelta(minutes=30):
-                    info["status"] = "open"
-                    info["user_id"] = None
-                    info["username"] = None
-                    info["pending_time"] = None
-                    updated = True
-            except Exception:
-                pass
-
-    if updated:
-        save_data(data)
-
-    return data
-
-
-def save_data(data):
-    with open(DATA_FILE, "w") as f:
-        json.dump(data, f, indent=4)
-
-
-def generate_ticket_keyboard(tickets, bot_username=""):
+def generate_keyboard():
+    """የቲኬቶቹን ሰንጠረዥ ይፈጥራል"""
     keyboard = []
     row = []
-    status_emojis = {"open": "🟢", "pending": "🟡", "sold": "🔴"}
+    now = datetime.now()
 
-    actual_username = "AddisHub_Bot"
+    for num, data in tickets.items():
+        # የ30 ደቂቃ የቆይታ ጊዜ ካለፈ ቲኬቱን መልሶ ክፍት ማድረግ
+        if data["status"] == "🟡" and data["expires_at"] and now > data["expires_at"]:
+            data["status"] = "🟢"
+            data["user_id"] = None
+            data["expires_at"] = None
 
-    for i in range(1, 51):
-        t_num = str(i)
-        info = tickets.get(t_num, {"status": "open"})
-        status = info["status"]
-        emoji = status_emojis.get(status, "🟢")
-
-        label = f"{t_num} {emoji}"
+        status_icon = data["status"]
+        button_text = f"{num} {status_icon}"
+        callback_data = f"select_{num}"
+        row.append(InlineKeyboardButton(button_text, callback_data=callback_data))
         
-        if status == "open":
-            url = f"https://t.me/{actual_username}?start=tkt_{t_num}"
-            row.append(InlineKeyboardButton(label, url=url))
-        else:
-            row.append(InlineKeyboardButton(label, callback_data=f"tkt_info_{t_num}"))
-
         if len(row) == 5:
             keyboard.append(row)
             row = []
-
-    if row:
-        keyboard.append(row)
-
-    keyboard.append([
-        InlineKeyboardButton(
-            "🔄 ሰንጠረዥ አድስ (Refresh)", callback_data="refresh_board"
-        )
-    ])
+    
+    if row: keyboard.append(row)
     return InlineKeyboardMarkup(keyboard)
 
-
-async def update_live_boards(context: ContextTypes.DEFAULT_TYPE):
-    data = load_data()
-    bot_info = await context.bot.get_me()
-    keyboard = generate_ticket_keyboard(data["tickets"], bot_info.username)
-
-    open_count = sum(1 for t in data["tickets"].values() if t["status"] == "open")
-    pending_count = sum(
-        1 for t in data["tickets"].values() if t["status"] == "pending"
+async def update_live_messages(context: ContextTypes.DEFAULT_TYPE):
+    """በግሩፕ እና በቻናል ላይ ያለውን ሰንጠረዥ ያድሳል"""
+    text = (
+        "🎰 **የሎተሪ ቲኬቶች ዝርዝር**\n\n"
+        "🟢 ክፍት | 🟡 በመጠባበቅ | 🔴 የተሸጠ\n\n"
+        "**የአንዱ ቲኬት ዋጋ፡ 100 ብር**\n"
+        "ለመግዛት የፈለጉትን ቁጥር ይጫኑ።"
     )
-    sold_count = sum(1 for t in data["tickets"].values() if t["status"] == "sold")
-
-    sold_details = []
-    for t_num, info in data["tickets"].items():
-        if info["status"] == "sold":
-            uname = f"@{info['username']}" if info.get("username") else f"ID:{info['user_id']}"
-            sold_details.append(f"▪️ ቲኬት #{t_num} — {uname} ✅")
-
-    sold_list_text = (
-        "\n".join(sold_details) if sold_details else "▪️ ገና የተረጋገጠ የለም"
-    )
-
-    board_text = (
-        f"🎰 አዲስ ዲጂታል ሎተሪ\n"
-        f"የቲኬት ዋጋ፡ {data['ticket_price']} ብር\n"
-        f"💰 ሽልማት: {data['prize']}\n\n"
-        f"✅ የተረጋገጡ: {sold_count} | ⏳ በመጠባበቅ ላይ: {pending_count} | 🟢 ክፍት: {open_count}\n\n"
-        f"✅ የተረጋገጡ ዝርዝር:\n{sold_list_text}\n\n"
-        f"👇 ለመግዛት የሚፈልጉትን ቲኬት ይጫኑ:"
-    )
-
-    for chat_id_key, msg_id in data.get("announcement_message_ids", {}).items():
-        try:
+    reply_markup = generate_keyboard()
+    
+    try:
+        if message_trackers["group_msg_id"]:
             await context.bot.edit_message_text(
-                chat_id=int(chat_id_key),
-                message_id=msg_id,
-                text=board_text,
-                reply_markup=keyboard,
+                text=text, chat_id=GROUP_CHAT_ID, 
+                message_id=message_trackers["group_msg_id"], 
+                reply_markup=reply_markup, parse_mode="Markdown"
             )
-        except Exception as e:
-            logger.warning(f"Could not update message in {chat_id_key}: {e}")
+        if message_trackers["channel_msg_id"]:
+            await context.bot.edit_message_text(
+                text=text, chat_id=CHANNEL_CHAT_ID, 
+                message_id=message_trackers["channel_msg_id"], 
+                reply_markup=reply_markup, parse_mode="Markdown"
+            )
+    except Exception as e:
+        logging.error(f"Update Error: {e}")
 
+# --- 4. የቦቱ ትዕዛዞች (HANDLERS) ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     args = context.args
-    data = load_data()
-
-    if args and args[0].startswith("tkt_"):
-        t_num = args[0].split("_")[1]
-        ticket = data["tickets"].get(t_num)
-
-        if ticket:
-            if ticket["status"] == "sold":
-                await update.message.reply_text(
-                    f"❌ ይቅርታ! ቲኬት ቁጥር {t_num} ቀድሞውኑ ተሽጧል።"
-                )
-                return
-
-            if ticket["status"] == "pending":
-                if ticket["user_id"] == user.id:
-                    await update.message.reply_text(
-                        f"⚠️ ቲኬት ቁጥር {t_num} በእርስዎ ስም ክፍያ ማረጋገጫ በመጠበቅ ላይ ይገኛል።"
-                    )
-                else:
-                    await update.message.reply_text(
-                        f"⚠️ ይቅርታ! ቲኬት ቁጥር {t_num} በአሁኑ ሰዓት በሌላ ተጠቃሚ ክፍያ ሂደት ላይ ነው።"
-                    )
-                return
-
-            data["tickets"][t_num]["status"] = "pending"
-            data["tickets"][t_num]["user_id"] = user.id
-            data["tickets"][t_num]["username"] = user.username
-            data["tickets"][t_num]["pending_time"] = datetime.now().isoformat()
-            save_data(data)
-
-            try:
-                await update_live_boards(context)
-            except Exception as e:
-                logger.error(f"Error updating live boards: {e}")
-
-            instructions = (
-                f"🎟 መረጡት ቲኬት ቁጥር: {t_num}\n\n"
-                f"⚠️ ማሳሰቢያ: ይህ ቲኬት ለሚቀጥሉት 30 ደቂቃዎች ብቻ ለእርስዎ ተይዟል!\n\n"
-                f"ትኬቱን ለመግዛት ከታች ያሉትን የቴሌብር መመሪያዎች ይከተሉ:\n\n"
-                f"1️⃣ በ TeleBirr ገንዘብ ያስተላልፉ:\n"
-                f"   📱 አካውንት ቁጥር: {TELE_BIRR_NUMBER}\n"
-                f"   💵 መጠን: {data['ticket_price']} ብር\n\n"
-                f"2️⃣ ገንዘቡን ከላኩ በኋላ የግብይቱን ማረጋገጫ በዚህ ፕራይቬት ቻት ፎቶ ወይም ጽሑፍ በመላክ ያረጋግጡ።"
-            )
-            await update.message.reply_text(instructions)
-            return
-
-    bot_info = await context.bot.get_me()
-    keyboard = generate_ticket_keyboard(data["tickets"], bot_info.username)
-    welcome_text = (
-        f"🇪🇹 እንኳን ደህና መጡ ወደ ሎተሪ ቦት!\n\n"
-        f"💰 የቲኬት ዋጋ፡ {data['ticket_price']} ብር\n"
-        f"🎁 ሽልማት: {data['prize']}\n\n"
-        f"ከታች የሚፈልጉትን ቲኬት በመምረጥ መግዛት ይችላሉ:"
-    )
-    await update.message.reply_text(welcome_text, reply_markup=keyboard)
-
-
-async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    try:
-        await query.answer()
-    except Exception:
-        pass
-
-    data = load_data()
-
-    if query.data == "refresh_board":
-        await update_live_boards(context)
+    
+    # Deep-link handle: /start select_5
+    if args and args[0].startswith("select_"):
         try:
-            await query.answer("ሰንጠረዡ ታድሷል!", show_alert=False)
-        except Exception:
-            pass
-        return
-
-    if query.data.startswith("tkt_info_"):
-        t_num = query.data.split("_")[2]
-        ticket = data["tickets"].get(t_num, {})
-        status = ticket.get("status", "open")
-        if status == "sold":
-            await query.answer(f"❌ ቲኬት #{t_num} ተሽጧል!", show_alert=True)
-        elif status == "pending":
-            await query.answer(f"⚠️ ቲኬት #{t_num} በሂደት ላይ (Pending) ነው።", show_alert=True)
-        else:
-            await query.answer(f"🟢 ቲኬት #{t_num} ክፍት ነው።", show_alert=True)
-
-
-async def handle_payment_proof(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-):
-    if update.message.chat.type != "private":
-        return
-
-    user = update.effective_user
-    data = load_data()
-
-    pending_ticket = None
-    for t_num, info in data["tickets"].items():
-        if info["status"] == "pending" and info["user_id"] == user.id:
-            pending_ticket = t_num
-            break
-
-    if not pending_ticket:
-        await update.message.reply_text(
-            "ℹ️ በአሁኑ ሰዓት በመጠበቅ ላይ ያለ (Pending) ቲኬት የለዎትም።"
-        )
-        return
-
-    admin_text = (
-        f"📥 አዲስ የክፍያ ማረጋገጫ ደርሷል!\n\n"
-        f"🎟 ቲኬት ቁጥር: {pending_ticket}\n"
-        f"👤 ስም: {user.full_name}\n"
-        f"🆔 ዩዘርናም: @{user.username if user.username else 'N/A'}\n"
-        f"🆔 መለያ (ID): {user.id}\n\n"
-        f"መልእክት/አይዲ: {update.message.text if update.message.text else '[ፎቶ ማረጋገጫ]'}"
-    )
-
-    if update.message.photo:
-        await context.bot.send_photo(
-            chat_id=ADMIN_CHAT_ID,
-            photo=update.message.photo[-1].file_id,
-            caption=admin_text,
-        )
+            ticket_num = int(args[0].split("_")[1])
+            await handle_selection_logic(update, context, ticket_num)
+        except:
+            await update.message.reply_text("ስህተት ተከስቷል። እባክዎ እንደገና ይሞክሩ።")
     else:
-        await context.bot.send_message(
-            chat_id=ADMIN_CHAT_ID,
-            text=admin_text,
+        await update.message.reply_text(
+            f"ሰላም {user.first_name}! እንኳን ወደ ሎተሪ ቦት በሰላም መጡ።\n\n"
+            "ቲኬት ለመግዛት በግሩፕ ወይም በቻናል የተለጠፈውን ሰንጠረዥ ይጠቀሙ።"
         )
 
-    await update.message.reply_text(
-        f"✅ የቲኬት ቁጥር {pending_ticket} የክፍያ ማረጋገጫዎ ለአስተዳዳሪው ተልኳል! "
-        "እባክዎ አስተዳዳሪው እስኪያረጋግጥ ድረስ ትንሽ ይጠብቁ።"
-    )
-
-
-async def admin_action_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def open_lottery(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """አስተዳዳሪው ሎተሪውን እንዲከፍት"""
     if update.effective_user.id != ADMIN_CHAT_ID:
         return
 
-    if not update.message.reply_to_message:
-        await update.message.reply_text("⚠️ እባክዎ ማረጋገጫውን (Receipt) **Reply** በማድረግ /approve ወይም /reject ይበሉ!")
-        return
+    text = "🎰 **የሎተሪ ቲኬቶች ዝርዝር ተከፍቷል!**\n\n🟢 ክፍት | 🟡 በመጠባበቅ | 🔴 የተሸጠ\n\nለመግዛት ቁጥር ይጫኑ።"
+    reply_markup = generate_keyboard()
+    
+    msg_g = await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=text, reply_markup=reply_markup, parse_mode="Markdown")
+    msg_c = await context.bot.send_message(chat_id=CHANNEL_CHAT_ID, text=text, reply_markup=reply_markup, parse_mode="Markdown")
+    
+    message_trackers["group_msg_id"] = msg_g.message_id
+    message_trackers["channel_msg_id"] = msg_c.message_id
+    await update.message.reply_text("✅ ሎተሪው በግሩፕ እና በቻናል ላይ በይፋ ተከፍቷል።")
 
-    replied_msg = update.message.reply_to_message
-    replied_text = replied_msg.caption or replied_msg.text or ""
-
-    user_id = None
-    t_num = None
-
-    for line in replied_text.split("\n"):
-        if "ቲኬት ቁጥር:" in line:
-            t_num = line.split("ቲኬት ቁጥር:")[1].strip()
-        if "መለያ (ID):" in line:
-            try:
-                user_id = int(line.split("መለያ (ID):")[1].strip())
-            except Exception:
-                pass
-
-    if not t_num or not user_id:
-        await update.message.reply_text("❌ ከተሰጠው መልእክት ውስጥ የቲኬት ቁጥር ወይም የዩዘር ID ማንበብ አልተቻለም።")
-        return
-
-    data = load_data()
-    command = update.message.text.lower()
-
-    if "/approve" in command:
-        if t_num in data["tickets"]:
-            data["tickets"][t_num]["status"] = "sold"
-            data["tickets"][t_num]["pending_time"] = None
-            save_data(data)
-            await update_live_boards(context)
-
-            try:
-                await context.bot.send_message(
-                    chat_id=user_id,
-                    text=f"🎉 እንኳን ደስ አለዎት! የቲኬት ቁጥር {t_num} ክፍያዎ ተረጋግጧል!",
-                )
-            except Exception as e:
-                logger.error(f"Could not message user {user_id}: {e}")
-
-            await update.message.reply_text(f"✅ ቲኬት ቁጥር {t_num} ተረጋግጧል (Sold)!")
-            
-            try:
-                if replied_msg.photo:
-                    await replied_msg.edit_caption(caption=f"{replied_text}\n\n✅ ሁኔታ: ጽድቅ ተሰጥቷል (Sold)")
-                else:
-                    await replied_msg.edit_text(text=f"{replied_text}\n\n✅ ሁኔታ: ጽድቅ ተሰጥቷል (Sold)")
-            except Exception:
-                pass
-
-    elif "/reject" in command:
-        if t_num in data["tickets"]:
-            data["tickets"][t_num]["status"] = "open"
-            data["tickets"][t_num]["user_id"] = None
-            data["tickets"][t_num]["username"] = None
-            data["tickets"][t_num]["pending_time"] = None
-            save_data(data)
-            await update_live_boards(context)
-
-            try:
-                await context.bot.send_message(
-                    chat_id=user_id,
-                    text=f"❌ ይቅርታ! ለቲኬት ቁጥር {t_num} የላኩት ማረጋገጫ ውድቅ ተደርጓል።",
-                )
-            except Exception as e:
-                logger.error(f"Could not message user {user_id}: {e}")
-
-            await update.message.reply_text(f"❌ ቲኬት ቁጥር {t_num} ውድቅ ተደርጓል (Rejected)።")
-            
-            try:
-                if replied_msg.photo:
-                    await replied_msg.edit_caption(caption=f"{replied_text}\n\n❌ ሁኔታ: ውድቅ ተደርጓል (Rejected)")
-                else:
-                    await replied_msg.edit_text(text=f"{replied_text}\n\n❌ ሁኔታ: ውድቅ ተደርጓል (Rejected)")
-            except Exception:
-                pass
-
-
-async def cmd_open(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_CHAT_ID:
-        return
-    data = load_data()
-    data["game_active"] = True
-
-    for t_num in data["tickets"]:
-        data["tickets"][t_num] = {
-            "status": "open",
-            "user_id": None,
-            "username": None,
-            "pending_time": None,
-        }
-    save_data(data)
-
+async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """በግሩፕ ውስጥ ቁጥር ሲጫኑ ወደ ቦቱ ፕራይቬት ቻት የሚወስድ"""
+    query = update.callback_query
+    ticket_num = query.data.split("_")[1]
     bot_info = await context.bot.get_me()
-    keyboard = generate_ticket_keyboard(data["tickets"], bot_info.username)
-    board_text = (
-        f"🎰 አዲስ ዲጂታል ሎተሪ\n"
-        f"የቲኬት ዋጋ፡ {data['ticket_price']} ብር\n"
-        f"💰 ሽልማት: {data['prize']}\n\n"
-        f"✅ የተረጋገጡ: 0 | ⏳ በመጠባበቅ ላይ: 0 | 🟢 ክፍት: 50\n\n"
-        f"✅ የተረጋገጡ ዝርዝር:\n▪️ ገና የተረጋገጠ የለም\n\n"
-        f"👇 ለመግዛት የሚፈልጉትን ቲኬት ይጫኑ:"
+    # Redirect with deep link
+    url = f"https://t.me/{bot_info.username}?start=select_{ticket_num}"
+    await query.answer(url=url)
+
+async def handle_selection_logic(update: Update, context: ContextTypes.DEFAULT_TYPE, ticket_num: int):
+    user = update.effective_user
+    ticket = tickets.get(ticket_num)
+
+    if not ticket: return
+
+    if ticket["status"] == "🔴":
+        await update.message.reply_text("❌ ይቅርታ፣ ይህ ቲኬት ቀደም ብሎ ተሽጧል። እባክዎ ሌላ ይምረጡ።")
+        return
+    
+    if ticket["status"] == "🟡" and ticket["user_id"] != user.id:
+        await update.message.reply_text("⚠️ ይህ ቲኬት ሌላ ሰው ለመግዛት ሙከራ እያደረገ ነው (Pending)።")
+        return
+
+    # ቲኬቱን ለጊዜው መያዝ (30 ደቂቃ)
+    ticket["status"] = "🟡"
+    ticket["user_id"] = user.id
+    ticket["user_name"] = user.full_name
+    ticket["expires_at"] = datetime.now() + timedelta(minutes=30)
+
+    payment_msg = (
+        f"✅ ለቁጥር **{ticket_num}** ቲኬት መርጠዋል።\n\n"
+        f"💵 ዋጋ፡ **{TICKET_PRICE} ብር**\n"
+        f"📱 የቴሌብር ቁጥር፡ `{TELE_BIRR_NUMBER}`\n\n"
+        "እባክዎ ክፍያውን ፈጽመው የደረሰኝ ፎቶ (Screenshot) እዚህ ይላኩ።\n"
+        "⚠️ ይህ ቲኬት ለ 30 ደቂቃ ብቻ ይጠበቅልዎታል።"
     )
+    await update.message.reply_text(payment_msg, parse_mode="Markdown")
+    await update_live_messages(context)
+
+async def handle_proof(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """ተጠቃሚው ደረሰኝ ሲልክ ለአስተዳዳሪው ያስተላልፋል"""
+    user = update.effective_user
+    
+    # ተጠቃሚው የያዘውን ቲኬት መፈለግ
+    user_ticket = next((num for num, data in tickets.items() if data["user_id"] == user.id and data["status"] == "🟡"), None)
+    
+    if not user_ticket:
+        await update.message.reply_text("ምንም በመጠባበቅ ላይ ያለ ቲኬት የለዎትም። መጀመሪያ ቁጥር ይምረጡ።")
+        return
+
+    caption = (
+        f"📩 **የክፍያ ማረጋገጫ ደርሷል**\n\n"
+        f"ከ፡ {user.full_name} (@{user.username})\n"
+        f"ቲኬት ቁጥር፡ {user_ticket}\n"
+        f"User ID: {user.id}"
+    )
+    
+    if update.message.photo:
+        await context.bot.send_photo(chat_id=ADMIN_CHAT_ID, photo=update.message.photo[-1].file_id, caption=caption)
+    elif update.message.text:
+        await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=f"{caption}\n\nጽሑፍ ማረጋገጫ፡\n{update.message.text}")
+    
+    await update.message.reply_text("✅ ማረጋገጫው ለአስተዳዳሪ ተልኳል። ሲረጋገጥ መልእክት ይደርስዎታል።")
+
+async def admin_decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """አስተዳዳሪው ሲያጸድቅ ወይም ውድቅ ሲያደርግ"""
+    if update.effective_user.id != ADMIN_CHAT_ID or not update.message.reply_to_message:
+        return
+
+    msg_text = update.message.text.lower()
+    reply_msg = update.message.reply_to_message
+    content = reply_msg.caption or reply_msg.text
+
+    if "User ID:" not in content: return
 
     try:
-        msg_group = await context.bot.send_message(
-            chat_id=GROUP_CHAT_ID,
-            text=board_text,
-            reply_markup=keyboard,
-        )
-        
-        announcement_ids = {str(GROUP_CHAT_ID): msg_group.message_id}
-        data["announcement_message_ids"] = announcement_ids
-        save_data(data)
-
-        channel_keyboard = [[
-            InlineKeyboardButton(
-                "🎟 ቲኬት ለመግዛት ግሩፑን ይቀላቀሉ",
-                url=f"https://t.me/c/{str(GROUP_CHAT_ID)[4:]}/{msg_group.message_id}"
-            )
-        ]]
-        await context.bot.send_message(
-            chat_id=CHANNEL_CHAT_ID,
-            text=f"🎰 አዲስ ዲጂታል ሎተሪ ተከፍቷል!\n\n💰 ዋጋ: 100 ብር | 🎁 ሽልማት: 5,000 ብር\n\n👇 ቲኬት ለመምረጥ ግሩፓችንን ይቀላቀሉ!",
-            reply_markup=InlineKeyboardMarkup(channel_keyboard),
-        )
-
-        await update.message.reply_text("✅ ሎተሪው ተከፍቷል እና ሰንጠረዡ ተዘጋጅቷል!")
-    except Exception as e:
-        await update.message.reply_text(f"⚠️ መለጠፍ አልተቻለም: {e}")
-
-
-async def cmd_close(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_CHAT_ID:
+        target_user_id = int(content.split("User ID:")[1].strip())
+        ticket_num = int(content.split("ቲኬት ቁጥር:")[1].split("\n")[0].strip())
+    except:
+        await update.message.reply_text("ስህተት፡ መረጃውን ማንበብ አልተቻለም።")
         return
-    data = load_data()
-    data["game_active"] = False
-    save_data(data)
-    await update.message.reply_text("🔴 ሎተሪው ተዘግቷል!")
 
+    if "/approve" in msg_text:
+        tickets[ticket_num]["status"] = "🔴"
+        tickets[ticket_num]["expires_at"] = None
+        await context.bot.send_message(chat_id=target_user_id, text=f"🎉 እንኳን ደስ አለዎት! ለቁጥር {ticket_num} የከፈሉት ክፍያ ተረጋግጦ ቲኬቱ የእርስዎ ሆኗል። መልካም እድል!")
+        await update.message.reply_text(f"✅ ቲኬት {ticket_num} ተረጋገጠ።")
+    elif "/reject" in msg_text:
+        tickets[ticket_num]["status"] = "🟢"
+        tickets[ticket_num]["user_id"] = None
+        await context.bot.send_message(chat_id=target_user_id, text=f"❌ ይቅርታ፣ ለቁጥር {ticket_num} የላኩት ማረጋገጫ ተቀባይነት አላገኘም።")
+        await update.message.reply_text(f"❌ ቲኬት {ticket_num} ውድቅ ተደርጓል።")
+    
+    await update_live_messages(context)
 
-async def cmd_winner(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_CHAT_ID:
-        return
-    data = load_data()
-
-    sold_tickets = [
-        (t_num, info["user_id"])
-        for t_num, info in data["tickets"].items()
-        if info["status"] == "sold"
-    ]
-
+async def pick_winner(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """አሸናፊ በዘፈቀደ ለመምረጥ"""
+    if update.effective_user.id != ADMIN_CHAT_ID: return
+    
+    sold_tickets = [num for num, data in tickets.items() if data["status"] == "🔴"]
+    
     if not sold_tickets:
-        await update.message.reply_text("❌ የተሸጠ ቲኬት የለም!")
+        await update.message.reply_text("ምንም የተሸጠ ቲኬት የለም።")
         return
+    
+    winner_num = random.choice(sold_tickets)
+    winner_data = tickets[winner_num]
+    
+    winner_text = (
+        f"🎊 **የሎተሪው አሸናፊ ታውቋል!** 🎊\n\n"
+        f"ዕድለኛ ቁጥር፡ **{winner_num}**\n"
+        f"አሸናፊ፡ **{winner_data['user_name']}**\n\n"
+        "እንኳን ደስ አላችሁ! 🎁"
+    )
+    
+    await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=winner_text, parse_mode="Markdown")
+    await context.bot.send_message(chat_id=CHANNEL_CHAT_ID, text=winner_text, parse_mode="Markdown")
+    await update.message.reply_text(f"አሸናፊው ተለይቷል፡ ቁጥር {winner_num}")
 
-    winner_ticket, winner_id = random.choice(sold_tickets)
-    announcement = f"🏆 አሸናፊ ተገኝቷል!\n\n🎟 ቲኬት ቁጥር: {winner_ticket}\n👤 ዩዘር ID: {winner_id}"
-
-    await context.bot.send_message(chat_id=CHANNEL_CHAT_ID, text=announcement)
-    await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=announcement)
-    await update.message.reply_text("✅ አሸናፊው ተመርጧል!")
-
+# --- 5. MAIN ---
 
 def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).job_queue(None).build()
+    # 24/7 ሰርቨሩን ማስጀመር
+    keep_alive()
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("open", cmd_open))
-    app.add_handler(CommandHandler("close", cmd_close))
-    app.add_handler(CommandHandler("winner", cmd_winner))
-    app.add_handler(CommandHandler("approve", admin_action_command))
-    app.add_handler(CommandHandler("reject", admin_action_command))
+    # ቦቱን ማስጀመር
+    application = Application.builder().token(BOT_TOKEN).build()
 
-    app.add_handler(CallbackQueryHandler(callback_handler))
-    app.add_handler(MessageHandler(filters.PHOTO | filters.TEXT & ~filters.COMMAND, handle_payment_proof))
+    # Handlers
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("open", open_lottery))
+    application.add_handler(CommandHandler("winner", pick_winner))
+    application.add_handler(CommandHandler("approve", admin_decision))
+    application.add_handler(CommandHandler("reject", admin_decision))
+    
+    application.add_handler(CallbackQueryHandler(handle_callback))
+    
+    # ክፍያ ለሚልኩ (Photo ወይም Text)
+    application.add_handler(MessageHandler(filters.ChatType.PRIVATE & (filters.PHOTO | filters.TEXT) & ~filters.COMMAND, handle_proof))
 
-    print("Bot is running with AddisHub_Bot deep links...")
-    app.run_polling()
+    print("Bot is running...")
+    application.run_polling()
 
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
