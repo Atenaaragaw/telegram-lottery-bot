@@ -29,7 +29,7 @@ BOT_TOKEN = "7805572091:AAGal4nWPVNsItMFa5WpN2KJUQpxYcgEbDs"
 ADMIN_CHAT_ID = 5935470765
 GROUP_CHAT_ID = -1004347063089
 CHANNEL_CHAT_ID = -1003866567193
-GROUP_INVITE_LINK = "https://t.me/AddisAllInOneHub"
+GROUP_INVITE_LINK = "https://t.me/Addis_lottery"
 TELE_BIRR_NUMBER = "0912801444"
 TICKET_PRICE = 100
 TOTAL_TICKETS = 50
@@ -176,7 +176,7 @@ async def update_live_messages(context: ContextTypes.DEFAULT_TYPE):
 
     # Channel Update
     channel_text = f"🎰 **የሎተሪ ማስታወቂያ**\n\nየተሸጡ: {sold_count}\nየቀሩ: {remaining}\n\nለመግዛት ግሩፑን ይቀላቀሉ 👇"
-    channel_markup = InlineKeyboardMarkup([[InlineKeyboardButton("🎯 ግሩፑን ተቀላቅለህ ግዛ", url=GROUP_INVITE_LINK)]])
+    channel_markup = InlineKeyboardMarkup([[InlineKeyboardButton("🎯 ቲኬት ለመግዛት ግሩፑን ይጎብኙ", url=GROUP_INVITE_LINK)]])
 
     g_msg_id = get_setting("group_msg_id")
     c_msg_id = get_setting("chan_msg_id")
