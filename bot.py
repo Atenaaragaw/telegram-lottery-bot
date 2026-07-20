@@ -91,8 +91,6 @@ def generate_ticket_keyboard(tickets, bot_username=""):
         emoji = status_emojis.get(status, "🟢")
 
         label = f"{t_num} {emoji}"
-        
-        # Callback data በመጠቀም የቀስት ምልክት እንዳይኖረው እና በቀጥታ ቦቱን እንዲያነጋግር ተደርጓል
         row.append(InlineKeyboardButton(label, callback_data=f"tkt_select_{t_num}"))
 
         if len(row) == 5:
@@ -169,13 +167,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    
+    try:
+        await query.answer()
+    except Exception:
+        pass
+
     data = load_data()
     user = query.from_user
 
     if query.data == "refresh_board":
         await update_live_boards(context)
-        await query.answer("ሰንጠረዡ ታድሷል!")
+        try:
+            await query.answer("ሰንጠረዡ ታድሷል!", show_alert=False)
+        except Exception:
+            pass
         return
 
     if query.data.startswith("tkt_select_"):
@@ -202,27 +208,37 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         data["tickets"][t_num]["pending_time"] = datetime.now().isoformat()
         save_data(data)
 
-        await update_live_boards(context)
+        try:
+            await update_live_boards(context)
+        except Exception as e:
+            logger.error(f"Error updating live boards: {e}")
 
         instructions = (
             f"🎟 መረጡት ቲኬት ቁጥር: {t_num}\n\n"
-            f"⚠️ ማሳሰቢያ: ይህ ቲኬት ለሚቀጥሉት 30 ደቂቃዎች ብቻ ለእርስዎ ተይዟል! ክፍያ እስኪፈጽሙ ድረስ ክፍያ ካልፈጸሙ በ 30 ደቂቃ ዉስጥ ለሌሎች ደንበኞች ክፍት ይሆናል። \n\n"
+            f"⚠️ ማሳሰቢያ: ይህ ቲኬት ለሚቀጥሉት 30 ደቂቃዎች ብቻ ለእርስዎ ተይዟል!\n\n"
             f"ትኬቱን ለመግዛት ከታች ያሉትን የቴሌብር መመሪያዎች ይከተሉ:\n\n"
             f"1️⃣ በ TeleBirr ገንዘብ ያስተላልፉ:\n"
             f"   📱 አካውንት ቁጥር: {TELE_BIRR_NUMBER}\n"
             f"   💵 መጠን: {data['ticket_price']} ብር\n\n"
-            f"2️⃣ ገንዘቡን ከላኩ በኋላ የግብይቱን ማረጋገጫ በዚህ ፕራይቬት ቻት ፎቶ ወይም ጽሑፍ በመላክ (replay በማድረግ) ያረጋግጡ።"
+            f"2️⃣ ገንዘቡን ከላኩ በኋላ የግብይቱን ማረጋገጫ በዚህ ፕራይቬት ቻት ፎቶ ወይም ጽሑፍ በመላክ ያረጋግጡ።"
         )
-        await context.bot.send_message(chat_id=user.id, text=instructions)
+        
+        try:
+            await context.bot.send_message(chat_id=user.id, text=instructions)
+        except Exception as e:
+            logger.error(f"Could not send instructions to user {user.id}: {e}")
         return
 
     if query.data.startswith("tkt_info_"):
         t_num = query.data.split("_")[2]
-        ticket = data["tickets"][t_num]
-        if ticket["status"] == "sold":
+        ticket = data["tickets"].get(t_num, {})
+        status = ticket.get("status", "open")
+        if status == "sold":
             await query.answer(f"❌ ቲኬት #{t_num} ተሽጧል!", show_alert=True)
-        elif ticket["status"] == "pending":
+        elif status == "pending":
             await query.answer(f"⚠️ ቲኬት #{t_num} በሂደት ላይ (Pending) ነው።", show_alert=True)
+        else:
+            await query.answer(f"🟢 ቲኬት #{t_num} ክፍት ነው።", show_alert=True)
 
 
 async def handle_payment_proof(
@@ -250,7 +266,7 @@ async def handle_payment_proof(
         f"📥 አዲስ የክፍያ ማረጋገጫ ደርሷል!\n\n"
         f"🎟 ቲኬት ቁጥር: {pending_ticket}\n"
         f"👤 ስም: {user.full_name}\n"
-        f"🆔 ዩዘርኔም: @{user.username if user.username else 'N/A'}\n"
+        f"🆔 ዩዘርናም: @{user.username if user.username else 'N/A'}\n"
         f"🆔 መለያ (ID): {user.id}\n\n"
         f"መልእክት/አይዲ: {update.message.text if update.message.text else '[ፎቶ ማረጋገጫ]'}"
     )
@@ -455,7 +471,7 @@ def main():
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.PHOTO | filters.TEXT & ~filters.COMMAND, handle_payment_proof))
 
-    print("Bot is running with correct callback buttons...")
+    print("Bot is running with fully responsive callback buttons...")
     app.run_polling()
 
 
