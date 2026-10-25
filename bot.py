@@ -10,10 +10,17 @@ from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
+# ከ config.py ፋይል ላይ ማዋቀሪያዎችን ማስገባት
+from config import (
+    BOT_TOKEN, ADMIN_CHAT_ID, GROUP_CHAT_ID, CHANNEL_CHAT_ID,
+    GROUP_INVITE_LINK, TELE_BIRR_NUMBER, TICKET_PRICE, TOTAL_TICKETS, DATABASE_URL
+)
+
 # --- 1. KEEP-ALIVE ሰርቨር ---
 app = Flask('')
 @app.route('/')
-def home(): return "Bot is running with Phone Masking!"
+def home(): 
+    return "Bot is running smoothly with separate config & PostgreSQL!"
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
@@ -24,19 +31,8 @@ def keep_alive():
     t.daemon = True
     t.start()
 
-# --- 2. ማዋቀሪያ (CONFIG) ---
-BOT_TOKEN = "8900641412:AAGuK4sE6o65dNTrIIpDXHHRndfZV0QhOmY"
-ADMIN_CHAT_ID = 5935470765
-GROUP_CHAT_ID = -1004347063089
-CHANNEL_CHAT_ID = -1003866567193
-GROUP_INVITE_LINK = "https://t.me/Addis_lottery"
-TELE_BIRR_NUMBER = "0912801444"
-TICKET_PRICE = 100
-TOTAL_TICKETS = 50
-
-DATABASE_URL = os.environ.get('DATABASE_URL')
-
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # --- 3. ዳታቤዝ ተግባራት ---
 
@@ -44,102 +40,121 @@ def get_db_connection():
     return psycopg2.connect(DATABASE_URL, sslmode='require')
 
 def init_db():
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute('''
-        CREATE TABLE IF NOT EXISTS tickets (
-            id INTEGER PRIMARY KEY,
-            status TEXT DEFAULT '🟢',
-            user_id BIGINT,
-            user_name TEXT,
-            phone_number TEXT,
-            expires_at TIMESTAMP
-        )
-    ''')
-    cur.execute('''
-        CREATE TABLE IF NOT EXISTS settings (
-            key TEXT PRIMARY KEY,
-            value TEXT
-        )
-    ''')
-    # ኮለም መኖሩን ቼክ ማድረግ (ካልነበረ ለመጨመር)
-    cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name='tickets' AND column_name='phone_number'")
-    if not cur.fetchone():
-        cur.execute("ALTER TABLE tickets ADD COLUMN phone_number TEXT")
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS tickets (
+                id INTEGER PRIMARY KEY,
+                status TEXT DEFAULT '🟢',
+                user_id BIGINT,
+                user_name TEXT,
+                phone_number TEXT,
+                expires_at TIMESTAMP
+            )
+        ''')
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        ''')
+        cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name='tickets' AND column_name='phone_number'")
+        if not cur.fetchone():
+            cur.execute("ALTER TABLE tickets ADD COLUMN phone_number TEXT")
 
-    cur.execute("SELECT COUNT(*) FROM tickets")
-    if cur.fetchone()[0] == 0:
-        for i in range(1, TOTAL_TICKETS + 1):
-            cur.execute("INSERT INTO tickets (id, status) VALUES (%s, %s)", (i, '🟢'))
-    conn.commit()
-    cur.close()
-    conn.close()
+        cur.execute("SELECT COUNT(*) FROM tickets")
+        if cur.fetchone()[0] == 0:
+            for i in range(1, TOTAL_TICKETS + 1):
+                cur.execute("INSERT INTO tickets (id, status) VALUES (%s, %s)", (i, '🟢'))
+        conn.commit()
+        cur.close()
+    except Exception as e:
+        logger.error(f"Error initializing database: {e}")
+    finally:
+        if conn: conn.close()
 
-def get_all_tickets():
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute('''
-        UPDATE tickets SET status = '🟢', user_id = NULL, phone_number = NULL, expires_at = NULL 
-        WHERE status = '🟡' AND expires_at < %s
-    ''', (datetime.now(),))
-    conn.commit()
-    cur.execute("SELECT id, status, user_id, user_name, phone_number FROM tickets ORDER BY id")
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
+def db_get_all_tickets():
+    conn = None
+    rows = []
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('''
+            UPDATE tickets SET status = '🟢', user_id = NULL, phone_number = NULL, expires_at = NULL 
+            WHERE status = '🟡' AND expires_at < %s
+        ''', (datetime.now(),))
+        conn.commit()
+        cur.execute("SELECT id, status, user_id, user_name, phone_number FROM tickets ORDER BY id")
+        rows = cur.fetchall()
+        cur.close()
+    except Exception as e:
+        logger.error(f"Error in get_all_tickets: {e}")
+    finally:
+        if conn: conn.close()
     return rows
 
-def update_ticket(ticket_id, status, user_id=None, user_name=None, phone=None, expires_at=None):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute('''
-        UPDATE tickets SET status = %s, user_id = %s, user_name = %s, phone_number = %s, expires_at = %s 
-        WHERE id = %s
-    ''', (status, user_id, user_name, phone, expires_at, ticket_id))
-    conn.commit()
-    cur.close()
-    conn.close()
+def db_update_ticket(ticket_id, status, user_id=None, user_name=None, phone=None, expires_at=None):
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('''
+            UPDATE tickets SET status = %s, user_id = %s, user_name = %s, phone_number = %s, expires_at = %s 
+            WHERE id = %s
+        ''', (status, user_id, user_name, phone, expires_at, ticket_id))
+        conn.commit()
+        cur.close()
+    except Exception as e:
+        logger.error(f"Error updating ticket {ticket_id}: {e}")
+    finally:
+        if conn: conn.close()
 
-def set_setting(key, value):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (key, str(value)))
-    conn.commit()
-    cur.close()
-    conn.close()
+def db_set_setting(key, value):
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (key, str(value)))
+        conn.commit()
+        cur.close()
+    except Exception as e:
+        logger.error(f"Error setting {key}: {e}")
+    finally:
+        if conn: conn.close()
 
-def get_setting(key):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT value FROM settings WHERE key = %s", (key,))
-    row = cur.fetchone()
-    cur.close()
-    conn.close()
-    return row[0] if row else None
+def db_get_setting(key):
+    conn = None
+    val = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM settings WHERE key = %s", (key,))
+        row = cur.fetchone()
+        val = row[0] if row else None
+        cur.close()
+    except Exception as e:
+        logger.error(f"Error getting setting {key}: {e}")
+    finally:
+        if conn: conn.close()
+    return val
 
 # --- 4. ቦት ተግባራት ---
 
 def mask_phone(phone):
-    """ስልክ ቁጥር ለመደበቅ (ለምሳሌ፡ 0915289523 -> 0915****23)"""
     if not phone: 
         return "ያልታወቀ"
-    
     p = str(phone).strip()
-    
-    # ስልኩ 10 ወይም ከዚያ በላይ ቁጥር ካለው (ለምሳሌ 0915289523)
     if len(p) >= 10:
-        # የመጀመሪያዎቹን 4 ቁጥሮች ይወስዳል + ኮከቦችን ይጨምራል + የመጨረሻዎቹን 2 ቁጥሮች ይጨምራል
         return f"{p[:4]}****{p[-2:]}"
-    
-    # ስልኩ 9 ቁጥር ከሆነ (ለምሳሌ 915289523)
     elif len(p) == 9:
         return f"{p[:3]}****{p[-2:]}"
-    
     else:
         return "****"
 
 async def update_live_messages(context: ContextTypes.DEFAULT_TYPE):
-    tickets_data = get_all_tickets()
+    tickets_data = await asyncio.to_thread(db_get_all_tickets)
     bot_info = await context.bot.get_me()
     
     sold_count = sum(1 for t in tickets_data if t[1] == '🔴')
@@ -163,7 +178,6 @@ async def update_live_messages(context: ContextTypes.DEFAULT_TYPE):
     
     final_group_text = group_text + sold_list
     
-    # Keyboard generation
     keyboard = []
     row = []
     for t_id, status, u_id, u_name, phone in tickets_data:
@@ -174,17 +188,17 @@ async def update_live_messages(context: ContextTypes.DEFAULT_TYPE):
     if row: keyboard.append(row)
     group_markup = InlineKeyboardMarkup(keyboard)
 
-    # Channel Update
     channel_text = f"🎰 **የሎተሪ ማስታወቂያ**\n\nየተሸጡ: {sold_count}\nየቀሩ: {remaining}\n\nለመግዛት ግሩፑን ይቀላቀሉ 👇"
     channel_markup = InlineKeyboardMarkup([[InlineKeyboardButton("🎯 ቲኬት ለመግዛት ግሩፑን ይጎብኙ", url=GROUP_INVITE_LINK)]])
 
-    g_msg_id = get_setting("group_msg_id")
-    c_msg_id = get_setting("chan_msg_id")
+    g_msg_id = await asyncio.to_thread(db_get_setting, "group_msg_id")
+    c_msg_id = await asyncio.to_thread(db_get_setting, "chan_msg_id")
 
     try:
         if g_msg_id: await context.bot.edit_message_text(final_group_text, chat_id=GROUP_CHAT_ID, message_id=int(g_msg_id), reply_markup=group_markup, parse_mode="Markdown")
         if c_msg_id: await context.bot.edit_message_text(channel_text, chat_id=CHANNEL_CHAT_ID, message_id=int(c_msg_id), reply_markup=channel_markup, parse_mode="Markdown")
-    except: pass
+    except Exception as e:
+        logger.warning(f"Could not edit live messages: {e}")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -196,7 +210,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, ticket_num):
     user = update.effective_user
-    tickets_data = get_all_tickets()
+    tickets_data = await asyncio.to_thread(db_get_all_tickets)
     ticket = next((t for t in tickets_data if t[0] == ticket_num), None)
     
     if not ticket or ticket[1] == '🔴':
@@ -204,7 +218,7 @@ async def handle_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, t
         return
 
     expiry = datetime.now() + timedelta(minutes=30)
-    update_ticket(ticket_num, '🟡', user.id, user.full_name, None, expiry)
+    await asyncio.to_thread(db_update_ticket, ticket_num, '🟡', user.id, user.full_name, None, expiry)
     
     await update.message.reply_text(
         f"✅ ለቁጥር **{ticket_num}** ቲኬት መርጠዋል።\n\n"
@@ -216,8 +230,7 @@ async def handle_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, t
 
 async def handle_proof(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    tickets_data = get_all_tickets()
-    # ተጠቃሚው የያዘው (🟡) ቲኬት መኖሩን ማረጋገጥ
+    tickets_data = await asyncio.to_thread(db_get_all_tickets)
     ticket = next((t for t in tickets_data if t[2] == user.id and t[1] == '🟡'), None)
 
     if not ticket:
@@ -226,10 +239,10 @@ async def handle_proof(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     ticket_num = ticket[0]
 
-    # 1. ስልክ ቁጥር ከሆነ (Regex for Ethiopian numbers)
+    # 1. ስልክ ቁጥር ከሆነ
     if update.message.text and re.match(r"^(09|07|\+2519|\+2517)\d{8}$", update.message.text.strip()):
         phone = update.message.text.strip()
-        update_ticket(ticket_num, '🟡', user.id, user.full_name, phone, ticket[4] if len(ticket)>4 else None)
+        await asyncio.to_thread(db_update_ticket, ticket_num, '🟡', user.id, user.full_name, phone, ticket[4] if len(ticket)>4 else None)
         await update.message.reply_text(f"✅ ስልክ ቁጥር {phone} ተመዝግቧል። አሁን የደረሰኝ ፎቶ ይላኩ።")
         return
 
@@ -255,14 +268,16 @@ async def admin_decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tnum = int(content.split("ቲኬት፡")[1].split("\n")[0].strip())
         phone = content.split("የከፈለበት ስልክ፡")[1].split("\n")[0].strip()
         name = content.split("ስም፡")[1].split("\n")[0].strip()
-    except: return
+    except Exception as e: 
+        logger.error(f"Error parsing admin reply: {e}")
+        return
 
     if "/approve" in text:
-        update_ticket(tnum, '🔴', uid, name, phone, None)
+        await asyncio.to_thread(db_update_ticket, tnum, '🔴', uid, name, phone, None)
         await context.bot.send_message(uid, f"🎉 ቲኬት {tnum} ጸድቋል!")
         await update.message.reply_text(f"✅ ቁጥር {tnum} ተረጋግጧል።")
     elif "/reject" in text:
-        update_ticket(tnum, '🟢', None, None, None, None)
+        await asyncio.to_thread(db_update_ticket, tnum, '🟢', None, None, None, None)
         await context.bot.send_message(uid, f"❌ ቲኬት {tnum} ውድቅ ሆኗል።")
         await update.message.reply_text(f"❌ ቁጥር {tnum} ውድቅ ተደርጓል።")
     
@@ -270,13 +285,20 @@ async def admin_decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def open_lottery(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_CHAT_ID: return
-    conn = get_db_connection(); cur = conn.cursor()
-    cur.execute("UPDATE tickets SET status='🟢', user_id=NULL, user_name=NULL, phone_number=NULL, expires_at=NULL")
-    conn.commit(); cur.close(); conn.close()
+    
+    def reset_tickets():
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("UPDATE tickets SET status='🟢', user_id=NULL, user_name=NULL, phone_number=NULL, expires_at=NULL")
+        conn.commit()
+        cur.close()
+        conn.close()
+
+    await asyncio.to_thread(reset_tickets)
     msg_g = await context.bot.send_message(GROUP_CHAT_ID, "ሰሌዳው እየተዘጋጀ ነው...")
     msg_c = await context.bot.send_message(CHANNEL_CHAT_ID, "ማስታወቂያ...")
-    set_setting("group_msg_id", msg_g.message_id)
-    set_setting("chan_msg_id", msg_c.message_id)
+    await asyncio.to_thread(db_set_setting, "group_msg_id", msg_g.message_id)
+    await asyncio.to_thread(db_set_setting, "chan_msg_id", msg_c.message_id)
     await update_live_messages(context)
 
 def main():
@@ -287,6 +309,8 @@ def main():
     app_bot.add_handler(CommandHandler("open", open_lottery))
     app_bot.add_handler(MessageHandler(filters.REPLY & filters.User(ADMIN_CHAT_ID), admin_decision))
     app_bot.add_handler(MessageHandler(filters.ChatType.PRIVATE & (filters.PHOTO | filters.TEXT) & ~filters.COMMAND, handle_proof))
+    
+    print("Bot is up and running safely with separate config file!")
     app_bot.run_polling()
 
 if __name__ == '__main__':
