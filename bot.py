@@ -19,7 +19,7 @@ from config import (
 app = Flask('')
 @app.route('/')
 def home(): 
-    return "Bot is running with 1-Week Default Deadline & Archiving!"
+    return "Bot is running smoothly with Catchy Design & 1-Week Deadline!"
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
@@ -210,12 +210,16 @@ async def update_live_messages(context: ContextTypes.DEFAULT_TYPE):
         except:
             deadline_display = deadline_str
 
+    # አዲሱ ማራኪ እና የተዋበ የጽሁፍ ዲዛይን (Option 1)
     group_text = (
-        f"🎰 **የሎተሪ ቲኬቶች ሰሌዳ**\n\n"
-        f"📊 **ሁኔታ:** የተሸጡ: {sold_count} | የቀሩ: {remaining}\n"
-        f"⏳ **የቀረው ጊዜ:** {deadline_display}\n"
-        f"🟢 ክፍት | 🟡 በመጠባበቅ | 🔴 የተሸጠ\n\n"
-        f"ቁጥር በመጫን ቲኬት ይግዙ 👇"
+        f"🔥 **ዕድልዎን የሚፈትኑበት አጓጊ የሎተሪ ሰሌዳ!** 🔥\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"📊 **የቲኬቶች ሁኔታ:**\n"
+        f"• ተሸጡ: 🔴 **{sold_count}** | የቀሩ: 🟢 **{remaining}**\n"
+        f"⏳ ** እጣው ሊዎጣ የቀረው ጊዜ:** `{deadline_display}`\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🎨 **ሁኔታዎች:** 🟢 ክፍት | 🟡 በመጠባበቅ | 🔴 የተሸጠ\n\n"
+        f"👇 **አሁኑኑ የሚፈልጉትን ቁጥር በመጫን ዕድልዎን ይሞክሩ!**"
     )
     
     sold_list = "\n\n📜 **የተሸጡ ቲኬቶች ዝርዝር:**\n"
@@ -223,7 +227,7 @@ async def update_live_messages(context: ContextTypes.DEFAULT_TYPE):
     for t_id, status, u_id, u_name, phone in tickets_data:
         if status == '🔴':
             has_sold = True
-            sold_list += f"🎟 ቁጥር {t_id} - {u_name} ({mask_phone(phone)})\n"
+            sold_list += f"🎟 ቁጥር {t_id} ➔ **{u_name}** (`{mask_phone(phone)}`)\n"
     
     if not has_sold: sold_list = ""
     
@@ -239,7 +243,12 @@ async def update_live_messages(context: ContextTypes.DEFAULT_TYPE):
     if row: keyboard.append(row)
     group_markup = InlineKeyboardMarkup(keyboard)
 
-    channel_text = f"🎰 **የሎተሪ ማስታወቂያ**\n\nየተሸጡ: {sold_count}\nየቀሩ: {remaining}\n⏳ የቀረው ጊዜ: {deadline_display}\n\nለመግዛት ግሩፑን ይቀላቀሉ 👇"
+    channel_text = (
+        f"🔥 **የአዲስ ሎተሪ ማስታወቂያ!** 🔥\n\n"
+        f"📊 የተሸጡ: **{sold_count}** | የቀሩ: **{remaining}**\n"
+        f"⏳ እጣው ሊዎጣ የቀረው ጊዜ: `{deadline_display}`\n\n"
+        f"ለመግዛት ግሩፑን ይቀላቀሉ 👇"
+    )
     channel_markup = InlineKeyboardMarkup([[InlineKeyboardButton("🎯 ቲኬት ለመግዛት ግሩፑን ይጎብኙ", url=GROUP_INVITE_LINK)]])
 
     g_msg_id = await asyncio.to_thread(db_get_setting, "group_msg_id")
@@ -273,7 +282,7 @@ async def handle_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, t
     
     await update.message.reply_text(
         f"✅ ለቁጥር **{ticket_num}** ቲኬት መርጠዋል።\n\n"
-        f"1️⃣ መጀመሪያ የከፈሉበትን **የስልክ ቁጥር** ይላኩ።\n"
+        f"1️⃣ መጀመሪያ የከፈሉበትን የእርስዎን **የስልክ ቁጥር** ይላኩ።\n"
         f"2️⃣ በመቀጠል የደረሰኝ ፎቶ ይላኩ።\n\n"
         f"💵 ዋጋ፡ {TICKET_PRICE} ብር | 📱 ቴሌብር፡ `{TELE_BIRR_NUMBER}`", parse_mode="Markdown"
     )
@@ -293,7 +302,7 @@ async def handle_proof(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text and re.match(r"^(09|07|\+2519|\+2517)\d{8}$", update.message.text.strip()):
         phone = update.message.text.strip()
         await asyncio.to_thread(db_update_ticket, ticket_num, '🟡', user.id, user.full_name, phone, ticket[4] if len(ticket)>4 else None)
-        await update.message.reply_text(f"✅ ስልክ ቁጥር {phone} ተመዝግቧል። አሁን የደረሰኝ ፎቶ ይላኩ።")
+        await update.message.reply_text(f"✅ ስልክ ቁጥርዎ {phone} ተመዝግቧል። አሁን የደረሰኝ ፎቶ ይላኩ።")
         return
 
     if update.message.photo or (update.message.text and not re.match(r"^\d+$", update.message.text)):
@@ -305,7 +314,7 @@ async def handle_proof(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await context.bot.send_message(ADMIN_CHAT_ID, f"{caption}\n\nጽሑፍ፡ {update.message.text}")
         
-        await update.message.reply_text("✅ ማረጋገጫው ለአስተዳዳሪ ተልኳል።")
+        await update.message.reply_text("✅ ማረጋገጫው ለአስተዳዳሪ ተልኳል። እባክዎ እስኪረጋገጥ በትግስት ይጠብቁን!")
 
 async def admin_decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_CHAT_ID or not update.message.reply_to_message: return
@@ -323,22 +332,20 @@ async def admin_decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if "/approve" in text:
         await asyncio.to_thread(db_update_ticket, tnum, '🔴', uid, name, phone, None)
-        await context.bot.send_message(uid, f"🎉 ቲኬት {tnum} ጸድቋል!")
+        await context.bot.send_message(uid, f"🎉 ቲኬት {tnum} ጸድቋል። መልካም እድል!")
         await update.message.reply_text(f"✅ ቁጥር {tnum} ተረጋግጧል።")
     elif "/reject" in text:
         await asyncio.to_thread(db_update_ticket, tnum, '🟢', None, None, None, None)
         await context.bot.send_message(uid, f"❌ ቲኬት {tnum} ውድቅ ሆኗል።")
-        await update.message.reply_text(f"❌ ቁጥር {tnum} ውድቅ ተደርጓል።")
+        await update.message.reply_text(f"❌ ቁጥር {tnum} ውድቅ ተደርጓል። እባክዎ እንደገና በትክክል ይሞክሩ!")
     
     await update_live_messages(context)
 
 async def open_lottery(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_CHAT_ID: return
     
-    # 1. መረጃውን ማህደር ውስጥ ማስቀመጥ እና ሪሴት ማድረግ
     await asyncio.to_thread(archive_and_reset_tickets)
     
-    # 2. ነባሪው የጊዜ ገደብ ለ 7 ቀናት (1 ሳምንት) ማዘጋጀት
     default_deadline = datetime.now() + timedelta(days=7)
     await asyncio.to_thread(db_set_setting, "round_deadline", default_deadline.isoformat())
 
@@ -351,7 +358,6 @@ async def open_lottery(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def extend_deadline(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_CHAT_ID: return
     
-    # ሰዓት ሳይጠቀስ /extend ብቻ ከተጻፈ በነባሪነት 7 ቀናት (168 ሰዓት) ይጨምራል
     hours_to_add = 24 * 7 
     if context.args:
         try:
@@ -386,7 +392,7 @@ def main():
     app_bot.add_handler(MessageHandler(filters.REPLY & filters.User(ADMIN_CHAT_ID), admin_decision))
     app_bot.add_handler(MessageHandler(filters.ChatType.PRIVATE & (filters.PHOTO | filters.TEXT) & ~filters.COMMAND, handle_proof))
     
-    print("Bot is up and running with 1-week default deadline & archiving!")
+    print("Bot is up and running with catchy design & 1-week deadline!")
     app_bot.run_polling()
 
 if __name__ == '__main__':
