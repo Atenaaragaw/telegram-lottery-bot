@@ -10,7 +10,6 @@ from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-# ከ config.py ፋይል ላይ ማዋቀሪያዎችን ማስገባት
 from config import (
     BOT_TOKEN, ADMIN_CHAT_ID, GROUP_CHAT_ID, CHANNEL_CHAT_ID,
     GROUP_INVITE_LINK, TELE_BIRR_NUMBER, TICKET_PRICE, TOTAL_TICKETS, DATABASE_URL
@@ -20,7 +19,7 @@ from config import (
 app = Flask('')
 @app.route('/')
 def home(): 
-    return "Bot is running smoothly with separate config & PostgreSQL!"
+    return "Bot is running with Deadline & Archiving features!"
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
@@ -44,6 +43,7 @@ def init_db():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
+        
         cur.execute('''
             CREATE TABLE IF NOT EXISTS tickets (
                 id INTEGER PRIMARY KEY,
@@ -54,12 +54,25 @@ def init_db():
                 expires_at TIMESTAMP
             )
         ''')
+        
         cur.execute('''
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value TEXT
             )
         ''')
+
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS archive_rounds (
+                archive_id SERIAL PRIMARY KEY,
+                round_date TIMESTAMP,
+                ticket_id INTEGER,
+                user_id BIGINT,
+                user_name TEXT,
+                phone_number TEXT
+            )
+        ''')
+
         cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name='tickets' AND column_name='phone_number'")
         if not cur.fetchone():
             cur.execute("ALTER TABLE tickets ADD COLUMN phone_number TEXT")
@@ -140,6 +153,24 @@ def db_get_setting(key):
         if conn: conn.close()
     return val
 
+def archive_and_reset_tickets():
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('''
+            INSERT INTO archive_rounds (round_date, ticket_id, user_id, user_name, phone_number)
+            SELECT CURRENT_TIMESTAMP, id, user_id, user_name, phone_number 
+            FROM tickets WHERE status = '🔴'
+        ''')
+        cur.execute("UPDATE tickets SET status='🟢', user_id=NULL, user_name=NULL, phone_number=NULL, expires_at=NULL")
+        conn.commit()
+        cur.close()
+    except Exception as e:
+        logger.error(f"Error archiving and resetting tickets: {e}")
+    finally:
+        if conn: conn.close()
+
 # --- 4. ቦት ተግባራት ---
 
 def mask_phone(phone):
@@ -160,9 +191,26 @@ async def update_live_messages(context: ContextTypes.DEFAULT_TYPE):
     sold_count = sum(1 for t in tickets_data if t[1] == '🔴')
     remaining = TOTAL_TICKETS - sold_count
 
+    # የጊዜ ገደብ (Deadline) ማሳያ
+    deadline_str = await asyncio.to_thread(db_get_setting, "round_deadline")
+    deadline_display = "አልተወሰነም"
+    if deadline_str:
+        try:
+            dl_dt = datetime.fromisoformat(deadline_str)
+            remaining_time = dl_dt - datetime.now()
+            if remaining_time.total_seconds() > 0:
+                hours = int(remaining_time.total_seconds() // 3600)
+                minutes = int((remaining_time.total_seconds() % 3600) // 60)
+                deadline_display = f"{hours} ሰዓት ከ {minutes} ደቂቃ የቀረው"
+            else:
+                deadline_display = "⚠️ የጊዜ ገደቡ አልፏል!"
+        except:
+            deadline_display = deadline_str
+
     group_text = (
         f"🎰 **የሎተሪ ቲኬቶች ሰሌዳ**\n\n"
         f"📊 **ሁኔታ:** የተሸጡ: {sold_count} | የቀሩ: {remaining}\n"
+        f"⏳ **የቀረው ጊዜ:** {deadline_display}\n"
         f"🟢 ክፍት | 🟡 በመጠባበቅ | 🔴 የተሸጠ\n\n"
         f"ቁጥር በመጫን ቲኬት ይግዙ 👇"
     )
@@ -188,7 +236,7 @@ async def update_live_messages(context: ContextTypes.DEFAULT_TYPE):
     if row: keyboard.append(row)
     group_markup = InlineKeyboardMarkup(keyboard)
 
-    channel_text = f"🎰 **የሎተሪ ማስታወቂያ**\n\nየተሸጡ: {sold_count}\nየቀሩ: {remaining}\n\nለመግዛት ግሩፑን ይቀላቀሉ 👇"
+    channel_text = f"🎰 **የሎተሪ ማስታወቂያ**\n\nየተሸጡ: {sold_count}\nየቀሩ: {remaining}\n⏳ የቀረው ጊዜ: {deadline_display}\n\nለመግዛት ግሩፑን ይቀላቀሉ 👇"
     channel_markup = InlineKeyboardMarkup([[InlineKeyboardButton("🎯 ቲኬት ለመግዛት ግሩፑን ይጎብኙ", url=GROUP_INVITE_LINK)]])
 
     g_msg_id = await asyncio.to_thread(db_get_setting, "group_msg_id")
@@ -239,14 +287,12 @@ async def handle_proof(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     ticket_num = ticket[0]
 
-    # 1. ስልክ ቁጥር ከሆነ
     if update.message.text and re.match(r"^(09|07|\+2519|\+2517)\d{8}$", update.message.text.strip()):
         phone = update.message.text.strip()
         await asyncio.to_thread(db_update_ticket, ticket_num, '🟡', user.id, user.full_name, phone, ticket[4] if len(ticket)>4 else None)
         await update.message.reply_text(f"✅ ስልክ ቁጥር {phone} ተመዝግቧል። አሁን የደረሰኝ ፎቶ ይላኩ።")
         return
 
-    # 2. ፎቶ ከሆነ (ደረሰኝ)
     if update.message.photo or (update.message.text and not re.match(r"^\d+$", update.message.text)):
         saved_phone = ticket[4] if len(ticket) > 4 else "አልተላከም"
         caption = f"📩 አዲስ ደረሰኝ፡\nቲኬት፡ {ticket_num}\nስም፡ {user.full_name}\nየከፈለበት ስልክ፡ {saved_phone}\nUser ID: {user.id}"
@@ -286,19 +332,44 @@ async def admin_decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def open_lottery(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_CHAT_ID: return
     
-    def reset_tickets():
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("UPDATE tickets SET status='🟢', user_id=NULL, user_name=NULL, phone_number=NULL, expires_at=NULL")
-        conn.commit()
-        cur.close()
-        conn.close()
+    # 1. የድሮውን መረጃ ማህደር ውስጥ ማስቀመጥ እና ሪሴት ማድረግ
+    await asyncio.to_thread(archive_and_reset_tickets)
+    
+    # 2. አዲስ የ 24 ሰዓት የጊዜ ገደብ (Deadline) ማዘጋጀት
+    default_deadline = datetime.now() + timedelta(hours=24)
+    await asyncio.to_thread(db_set_setting, "round_deadline", default_deadline.isoformat())
 
-    await asyncio.to_thread(reset_tickets)
     msg_g = await context.bot.send_message(GROUP_CHAT_ID, "ሰሌዳው እየተዘጋጀ ነው...")
     msg_c = await context.bot.send_message(CHANNEL_CHAT_ID, "ማስታወቂያ...")
     await asyncio.to_thread(db_set_setting, "group_msg_id", msg_g.message_id)
     await asyncio.to_thread(db_set_setting, "chan_msg_id", msg_c.message_id)
+    await update_live_messages(context)
+
+async def extend_deadline(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_CHAT_ID: return
+    
+    # ትዕዛዙን ሲልክ ለምሳሌ: /extend 12 (ለ 12 ሰዓታት ለማራዘም)
+    hours_to_add = 24 # ነባሪ (Default) ማራዘሚያ 24 ሰዓት
+    if context.args:
+        try:
+            hours_to_add = int(context.args[0])
+        except ValueError:
+            pass
+
+    current_deadline_str = await asyncio.to_thread(db_get_setting, "round_deadline")
+    base_time = datetime.now()
+    if current_deadline_str:
+        try:
+            parsed_dl = datetime.fromisoformat(current_deadline_str)
+            if parsed_dl > base_time:
+                base_time = parsed_dl # ካለበት ሰዓት ላይ ይጨምራል
+        except:
+            pass
+
+    new_deadline = base_time + timedelta(hours=hours_to_add)
+    await asyncio.to_thread(db_set_setting, "round_deadline", new_deadline.isoformat())
+    
+    await update.message.reply_text(f"✅ የሎተሪው ጊዜ ገደብ በ {hours_to_add} ሰዓታት ተራዝሟል!")
     await update_live_messages(context)
 
 def main():
@@ -307,10 +378,11 @@ def main():
     app_bot = Application.builder().token(BOT_TOKEN).build()
     app_bot.add_handler(CommandHandler("start", start))
     app_bot.add_handler(CommandHandler("open", open_lottery))
+    app_bot.add_handler(CommandHandler("extend", extend_deadline))
     app_bot.add_handler(MessageHandler(filters.REPLY & filters.User(ADMIN_CHAT_ID), admin_decision))
     app_bot.add_handler(MessageHandler(filters.ChatType.PRIVATE & (filters.PHOTO | filters.TEXT) & ~filters.COMMAND, handle_proof))
     
-    print("Bot is up and running safely with separate config file!")
+    print("Bot is up and running with deadline extension support!")
     app_bot.run_polling()
 
 if __name__ == '__main__':
