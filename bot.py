@@ -214,7 +214,7 @@ async def update_live_messages(context: ContextTypes.DEFAULT_TYPE):
         f"🔥 **ዕድልዎን የሚፈትኑበት አጓጊ የሎተሪ ሰሌዳ!** 🔥\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"📊 **የቲኬቶች ሁኔታ:**\n"
-        f"• ተሸጡ: 🔴 **{sold_count}** | የቀሩ: 🟢 **{remaining}**\n"
+        f"የተሸጡ: 🔴 **{sold_count}** | የቀሩ: 🟢 **{remaining}**\n"
         f"⏳ **ዕጣው ሊወጣ የቀረው ጊዜ:** `{deadline_display}`\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"🎨 **ሁኔታዎች:** 🟢 ክፍት | 🟡 በመጠባበቅ | 🔴 የተሸጠ\n\n"
@@ -245,7 +245,7 @@ async def update_live_messages(context: ContextTypes.DEFAULT_TYPE):
     channel_text = (
         f"🔥 **የአዲስ ሎተሪ ማስታወቂያ!** 🔥\n\n"
         f"📊 የተሸጡ: **{sold_count}** | የቀሩ: **{remaining}**\n"
-        f"⏳ ዕጣም ሊወጣ የቀረው ጊዜ: `{deadline_display}`\n\n"
+        f"⏳ ዕጣው ሊወጣ የቀረው ጊዜ: `{deadline_display}`\n\n"
         f"ለመግዛት ግሩፑን ይቀላቀሉ 👇"
     )
     channel_markup = InlineKeyboardMarkup([[InlineKeyboardButton("🎯 ቲኬት ለመግዛት ግሩፑን ይጎብኙ", url=GROUP_INVITE_LINK)]])
