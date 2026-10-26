@@ -19,7 +19,7 @@ from config import (
 app = Flask('')
 @app.route('/')
 def home(): 
-    return "Bot is running smoothly with Catchy Design & 1-Week Deadline!"
+    return "Bot is running with Winner & Repost features!"
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
@@ -210,13 +210,12 @@ async def update_live_messages(context: ContextTypes.DEFAULT_TYPE):
         except:
             deadline_display = deadline_str
 
-    # አዲሱ ማራኪ እና የተዋበ የጽሁፍ ዲዛይን (Option 1)
     group_text = (
         f"🔥 **ዕድልዎን የሚፈትኑበት አጓጊ የሎተሪ ሰሌዳ!** 🔥\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"📊 **የቲኬቶች ሁኔታ:**\n"
         f"• ተሸጡ: 🔴 **{sold_count}** | የቀሩ: 🟢 **{remaining}**\n"
-        f"⏳ ** እጣው ሊዎጣ የቀረው ጊዜ:** `{deadline_display}`\n"
+        f"⏳ **ዕጣው ሊወጣ የቀረው ጊዜ:** `{deadline_display}`\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"🎨 **ሁኔታዎች:** 🟢 ክፍት | 🟡 በመጠባበቅ | 🔴 የተሸጠ\n\n"
         f"👇 **አሁኑኑ የሚፈልጉትን ቁጥር በመጫን ዕድልዎን ይሞክሩ!**"
@@ -246,7 +245,7 @@ async def update_live_messages(context: ContextTypes.DEFAULT_TYPE):
     channel_text = (
         f"🔥 **የአዲስ ሎተሪ ማስታወቂያ!** 🔥\n\n"
         f"📊 የተሸጡ: **{sold_count}** | የቀሩ: **{remaining}**\n"
-        f"⏳ እጣው ሊዎጣ የቀረው ጊዜ: `{deadline_display}`\n\n"
+        f"⏳ ዕጣም ሊወጣ የቀረው ጊዜ: `{deadline_display}`\n\n"
         f"ለመግዛት ግሩፑን ይቀላቀሉ 👇"
     )
     channel_markup = InlineKeyboardMarkup([[InlineKeyboardButton("🎯 ቲኬት ለመግዛት ግሩፑን ይጎብኙ", url=GROUP_INVITE_LINK)]])
@@ -282,7 +281,7 @@ async def handle_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, t
     
     await update.message.reply_text(
         f"✅ ለቁጥር **{ticket_num}** ቲኬት መርጠዋል።\n\n"
-        f"1️⃣ መጀመሪያ የከፈሉበትን የእርስዎን **የስልክ ቁጥር** ይላኩ።\n"
+        f"1️⃣ መጀመሪያ የከፈሉበትን የርስዎን**የስልክ ቁጥር** ይላኩ።\n"
         f"2️⃣ በመቀጠል የደረሰኝ ፎቶ ይላኩ።\n\n"
         f"💵 ዋጋ፡ {TICKET_PRICE} ብር | 📱 ቴሌብር፡ `{TELE_BIRR_NUMBER}`", parse_mode="Markdown"
     )
@@ -302,7 +301,7 @@ async def handle_proof(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text and re.match(r"^(09|07|\+2519|\+2517)\d{8}$", update.message.text.strip()):
         phone = update.message.text.strip()
         await asyncio.to_thread(db_update_ticket, ticket_num, '🟡', user.id, user.full_name, phone, ticket[4] if len(ticket)>4 else None)
-        await update.message.reply_text(f"✅ ስልክ ቁጥርዎ {phone} ተመዝግቧል። አሁን የደረሰኝ ፎቶ ይላኩ።")
+        await update.message.reply_text(f"✅ ስልክ ቁጥር {phone} ተመዝግቧል። አሁን የደረሰኝ ፎቶ ይላኩ።")
         return
 
     if update.message.photo or (update.message.text and not re.match(r"^\d+$", update.message.text)):
@@ -314,7 +313,7 @@ async def handle_proof(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await context.bot.send_message(ADMIN_CHAT_ID, f"{caption}\n\nጽሑፍ፡ {update.message.text}")
         
-        await update.message.reply_text("✅ ማረጋገጫው ለአስተዳዳሪ ተልኳል። እባክዎ እስኪረጋገጥ በትግስት ይጠብቁን!")
+        await update.message.reply_text("✅ ማረጋገጫው ለአስተዳዳሪ ተልኳል።")
 
 async def admin_decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_CHAT_ID or not update.message.reply_to_message: return
@@ -332,12 +331,12 @@ async def admin_decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if "/approve" in text:
         await asyncio.to_thread(db_update_ticket, tnum, '🔴', uid, name, phone, None)
-        await context.bot.send_message(uid, f"🎉 ቲኬት {tnum} ጸድቋል። መልካም እድል!")
+        await context.bot.send_message(uid, f"🎉 ቲኬት {tnum} ጸድቋል መልካም ዕድል!")
         await update.message.reply_text(f"✅ ቁጥር {tnum} ተረጋግጧል።")
     elif "/reject" in text:
         await asyncio.to_thread(db_update_ticket, tnum, '🟢', None, None, None, None)
-        await context.bot.send_message(uid, f"❌ ቲኬት {tnum} ውድቅ ሆኗል።")
-        await update.message.reply_text(f"❌ ቁጥር {tnum} ውድቅ ተደርጓል። እባክዎ እንደገና በትክክል ይሞክሩ!")
+        await context.bot.send_message(uid, f"❌ ቲኬት {tnum} ውድቅ ሆኗል። እባክዎ እንደገና የኩረጡ!")
+        await update.message.reply_text(f"❌ ቁጥር {tnum} ውድቅ ተደርጓል።")
     
     await update_live_messages(context)
 
@@ -354,6 +353,50 @@ async def open_lottery(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await asyncio.to_thread(db_set_setting, "group_msg_id", msg_g.message_id)
     await asyncio.to_thread(db_set_setting, "chan_msg_id", msg_c.message_id)
     await update_live_messages(context)
+
+async def post_board(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_CHAT_ID: return
+    
+    # አዲሱን የሰሌዳ መልእክት ወደ ግሩፕ እና ቻናል አዲስ ልኮ አዲሱን ID ማስቀመጥ
+    msg_g = await context.bot.send_message(GROUP_CHAT_ID, "ሰሌዳው ይጫናል...")
+    msg_c = await context.bot.send_message(CHANNEL_CHAT_ID, "ማስታወቂያ ይጫናል...")
+    await asyncio.to_thread(db_set_setting, "group_msg_id", msg_g.message_id)
+    await asyncio.to_thread(db_set_setting, "chan_msg_id", msg_c.message_id)
+    await update_live_messages(context)
+    await update.message.reply_text("✅ አዲሱ ሰሌዳ ግሩፕ ላይ ተለጥፏል! ቦቱ ከእንግዲህ ይህንን አዲስ መልእክት ኤዲት ያደርጋል።")
+
+async def pick_winner(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_CHAT_ID: return
+    
+    tickets_data = await asyncio.to_thread(db_get_all_tickets)
+    sold_tickets = [t for t in tickets_data if t[1] == '🔴']
+    
+    if not sold_tickets:
+        await update.message.reply_text("❌ እስካሁን የተሸጠ ቲኬት የለም፣ አሸናፊ መምረጥ አይቻልም!")
+        return
+    
+    # በዘፈቀደ አንድ የተሸጠ ቲኬት መምረጥ
+    winner = random.choice(sold_tickets)
+    t_id, status, u_id, u_name, phone = winner
+    
+    winner_text = (
+        f"🎉 **እንኳን ደስ አላችሁ! የዕድሉ አሸናፊ ተገኝቷል!** 🎉\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🎟 አሸናፊ ቲኬት ቁጥር፡ **{t_id}**\n"
+        f"👤 ስም፡ **{u_name}**\n"
+        f"📱 ስልክ፡ `{mask_phone(phone)}`\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🎊 አሸናፊው በዘፈቀደ ተመርጧል! እንኳን ደስ አለዎት!"
+    )
+    
+    # ለግሩፕ እና ለቻናል ማሳወቅ
+    await context.bot.send_message(GROUP_CHAT_ID, winner_text, parse_mode="Markdown")
+    try:
+        await context.bot.send_message(CHANNEL_CHAT_ID, winner_text, parse_mode="Markdown")
+    except:
+        pass
+    
+    await update.message.reply_text(f"✅ አሸናፊው ቁጥር {t_id} ({u_name}) ተመርጦ ለግሩፕ እና ቻናል ተነግሯል!")
 
 async def extend_deadline(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_CHAT_ID: return
@@ -388,11 +431,13 @@ def main():
     app_bot = Application.builder().token(BOT_TOKEN).build()
     app_bot.add_handler(CommandHandler("start", start))
     app_bot.add_handler(CommandHandler("open", open_lottery))
+    app_bot.add_handler(CommandHandler("post", post_board))
+    app_bot.add_handler(CommandHandler("winner", pick_winner))
     app_bot.add_handler(CommandHandler("extend", extend_deadline))
     app_bot.add_handler(MessageHandler(filters.REPLY & filters.User(ADMIN_CHAT_ID), admin_decision))
     app_bot.add_handler(MessageHandler(filters.ChatType.PRIVATE & (filters.PHOTO | filters.TEXT) & ~filters.COMMAND, handle_proof))
     
-    print("Bot is up and running with catchy design & 1-week deadline!")
+    print("Bot is up and running with /winner and /post commands!")
     app_bot.run_polling()
 
 if __name__ == '__main__':
